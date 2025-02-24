@@ -13,7 +13,7 @@ Develop a **C++ application** that harnesses the **Meta Quest 3s**’s hand-trac
    Convert 3D positions or quaternions into meaningful angles for each finger segment.
 
 3. **Real-Time Visualization**  
-   Display angles in a VR overlay with minimal performance impact.
+   Display angles in a local window that matches joint angle read from VR headset
 
 4. **Data Logging**  
    Store angle data for offline analysis or debugging (CSV/JSON).
