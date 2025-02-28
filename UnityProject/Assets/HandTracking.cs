@@ -1,236 +1,212 @@
-using UnityEngine;
-using System.Collections;
-using System;
+﻿using UnityEngine;
+using Oculus.Interaction.Input;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System;
 
-public class HandTracking : MonoBehaviour
+public enum HandSide { Left, Right }
+
+public class HandJointAnglesLogger : MonoBehaviour
 {
-    // Oculus Integration SDK objects for tracking hands.
-    private OVRHand hand;
-    private OVRSkeleton handSkeleton;
-    private OVRSkeleton.SkeletonType handType;
+    [SerializeField]
+    private bool _logToHUD = true;
 
-    // ID's to identify the tip bone for each finger.
-    private int[] tips =
-    {
-        (int)OVRSkeleton.BoneId.Hand_PinkyTip,
-        (int)OVRSkeleton.BoneId.Hand_RingTip,
-        (int)OVRSkeleton.BoneId.Hand_MiddleTip,
-        (int)OVRSkeleton.BoneId.Hand_IndexTip,
-        (int)OVRSkeleton.BoneId.Hand_ThumbTip
-    };
+    [SerializeField]
+    private float _logFrequency = 0.1f; // Log every 0.1 seconds
 
-    // Arrays to store calibration data for each finger's
-    // tip threshold, minimum and maximum flexion, and the number of calibration cycles.
-    private float[] tipThresholds = new float[5];
-    private float[] minFlexions = new float[5];
-    private float[] maxFlexions = new float[5];
-    private int[] cycles = new int[5];
+    // New: specify which hand this logger is for.
+    [SerializeField] private HandSide handSide;
 
-    // Boolean flags to track the state of the calibration process.
-    private bool calibrationActive = false;
-    private bool allFingersCalibrated = false;
+    private IHand _hand;
+    private float _timer = 0f;
 
-    // Store the sum of all fingers interpreted as bits:
-    // finger extended -> 1 ; finger flexed -> 0.
-    // Thumb is the most significant bit and pinky the least.
-    private bool[] isFingerExtended = new bool[5];
-    private int _handSum;
-    public int HandSum
-    {
-        get { return _handSum; }
-    }
-
-    // UDP networking fields.
-    public string remoteIP = "192.168.0.102"; // Replace with your PC's IP address.
-    public int remotePort = 9000; // Replace with your desired port.
+    
+    public string remoteIP = "255.255.255.255"; // Broadcast address
+    public int remotePort = 9000; // Port to send data to
     private UdpClient udpClient;
+
     private IPEndPoint remoteEndPoint;
 
-    void Start()
+    private void Start()
     {
-        // Get these components from the same GameObject this script is attached to.
-        hand = GetComponent<OVRHand>();
-        handSkeleton = GetComponent<OVRSkeleton>();
-        // Read whether this is a right hand or left hand.
-        handType = handSkeleton.GetSkeletonType();
+        _hand = GetComponent<IHand>();
+        if (_hand == null)
+        {
+            LogHUD("HandJointAnglesLogger requires a component that implements IHand on the same GameObject");
+            enabled = false;
+            return;
+        }
 
-        // Set up UDP client.
+        // Subscribe to hand updates
+        _hand.WhenHandUpdated += OnHandUpdated;
+
         udpClient = new UdpClient();
         remoteEndPoint = new IPEndPoint(IPAddress.Parse(remoteIP), remotePort);
     }
 
-    void Update()
+    private void OnDestroy()
     {
-        if (!hand.IsTracked)
+        if (_hand != null)
         {
-            LogHUD("Not Tracking ...");
+            _hand.WhenHandUpdated -= OnHandUpdated;
+        }
+    }
+
+    private void OnHandUpdated()
+    {
+        // This will be called whenever the hand data is updated
+        if (_logToHUD)
+        {
+            _timer += Time.deltaTime;
+            if (_timer >= _logFrequency)
+            {
+                _timer = 0f;
+                LogJointAngles();
+            }
+        }
+    }
+
+    private void LogJointAngles()
+    {
+        if (!_hand.IsTrackedDataValid)
+        {
+            LogHUD("Hand tracking not valid");
             return;
         }
 
-        if (hand.IsTracked && !calibrationActive)
+        if (_hand.GetJointPosesLocal(out ReadOnlyHandJointPoses jointPoses))
         {
-            calibrationActive = true;
-            StartCoroutine(CalibrateFingers());
+            string logMessage = "";
+            // Process thumb data
+            logMessage += GetThumbAngles(jointPoses);
+            // Process each non-thumb finger
+            logMessage += GetFingerAngles(jointPoses, HandFinger.Index);
+            logMessage += GetFingerAngles(jointPoses, HandFinger.Middle);
+            logMessage += GetFingerAngles(jointPoses, HandFinger.Ring);
+            logMessage += GetFingerAngles(jointPoses, HandFinger.Pinky);
+            LogHUD(handSide.ToString() + " hand Angles:\n" + logMessage);
+            // Send the joint angles over UDP
+            SendJointAngles(handSide.ToString() + " hand Angles:\n" +logMessage); 
         }
-
-        for (int i = 0; i < tips.Length; i++)
+        else
         {
-            // During calibration, adjust the minFlexions and maxFlexions.
-            float extension = GetFingerExtension(i);
-            if (calibrationActive)
-            {
-                // Adjust calibration values.
-                GetFingerExtension(i);
-            }
-            else
-            {
-                // Determine if finger is extended based on the threshold.
-                isFingerExtended[i] = extension >= tipThresholds[i];
-            }
-        }
-
-        if (!calibrationActive && allFingersCalibrated)
-        {
-            // Print joint angles (flexion for all joints, plus MCP abduction/adduction for fingers)
-            PrintJointAngles();
+            LogHUD("Failed to get joint poses");
         }
     }
 
-    IEnumerator CalibrateFingers()
+    /// <summary>
+    /// Returns a multi-line string containing all thumb joint angles.
+    /// Each line is formatted as "JointName: Angle".
+    /// </summary>
+    private string GetThumbAngles(ReadOnlyHandJointPoses jointPoses)
     {
-        // Set up base flexion values per finger and initialize counter.
-        for (int i = 0; i < 5; i++)
+        int[] indices = GetFingerJointIndices(HandFinger.Thumb);
+        if (indices.Length < 4)
         {
-            // min starts at max value, max starts at min and they evolve towards
-            // each other to find the mid-point for each tip to wrist distance.
-            minFlexions[i] = float.MaxValue;
-            maxFlexions[i] = float.MinValue;
-            cycles[i] = 0;
+            return "Insufficient joint data for Thumb\n";
         }
 
-        float[] prevExtension = new float[5];
-        while (!allFingersCalibrated)
+        // Transition: CMC → MCP
+        Quaternion cmcToMcp = Quaternion.Inverse(jointPoses[indices[0]].rotation) * jointPoses[indices[1]].rotation;
+        Vector3 cmcToMcpEuler = cmcToMcp.eulerAngles;
+        float cmcMcpFlexion = NormalizeAngle(cmcToMcpEuler.x);
+        float cmcMcpAdduction = NormalizeAngle(cmcToMcpEuler.y);
+
+        // Transition: MCP → IP
+        Quaternion mcpToIp = Quaternion.Inverse(jointPoses[indices[1]].rotation) * jointPoses[indices[2]].rotation;
+        Vector3 mcpToIpEuler = mcpToIp.eulerAngles;
+        float mcpIpFlexion = NormalizeAngle(mcpToIpEuler.x);
+        float mcpIpAdduction = NormalizeAngle(mcpToIpEuler.y);
+
+        // Transition: IP → TIP
+        Quaternion ipToTip = Quaternion.Inverse(jointPoses[indices[2]].rotation) * jointPoses[indices[3]].rotation;
+        Vector3 ipToTipEuler = ipToTip.eulerAngles;
+        float ipTipFlexion = NormalizeAngle(ipToTipEuler.x);
+        float ipTipAdduction = NormalizeAngle(ipToTipEuler.y);
+
+        string s = "";
+        s += $"Thumb CMC Flexion: {cmcMcpFlexion:F1}°\n";
+        s += $"Thumb CMC Adduction: {cmcMcpAdduction:F1}°\n";
+        s += $"Thumb MCP Flexion: {mcpIpFlexion:F1}°\n";
+        s += $"Thumb MCP Adduction: {mcpIpAdduction:F1}°\n";
+        s += $"Thumb IP Flexion: {ipTipFlexion:F1}°\n";
+        s += $"Thumb IP Adduction: {ipTipAdduction:F1}°\n";
+        return s;
+    }
+
+    /// <summary>
+    /// Returns a multi-line string containing joint angles for a non-thumb finger.
+    /// For non-thumb fingers, we compute:
+    /// - MCP→PIP rotation (using Euler angles for flexion and adduction)
+    /// - PIP→DIP rotation (using axis-angle for flexion)
+    /// Each line is formatted as "JointName: Angle".
+    /// </summary>
+    private string GetFingerAngles(ReadOnlyHandJointPoses jointPoses, HandFinger finger)
+    {
+        int[] indices = GetFingerJointIndices(finger);
+        if (indices.Length < 5)
         {
-            // Each finger will get a chance to contradict that all fingers are calibrated.
-            allFingersCalibrated = true;
-            LogHUD("Calibrating...");
-            for (int i = 0; i < 5; i++)
-            {
-                float extension = GetFingerExtension(i);
-                minFlexions[i] = Mathf.Min(minFlexions[i], extension);
-                maxFlexions[i] = Mathf.Max(maxFlexions[i], extension);
-                tipThresholds[i] = (minFlexions[i] + maxFlexions[i]) / 2f;
-
-                // Count calibration cycles based on crossing the threshold.
-                if (prevExtension[i] < tipThresholds[i] && extension >= tipThresholds[i])
-                {
-                    cycles[i]++;
-                }
-                else if (prevExtension[i] >= tipThresholds[i] && extension < tipThresholds[i])
-                {
-                    cycles[i]++;
-                }
-                prevExtension[i] = extension;
-
-                if (cycles[i] < 6)
-                {
-                    allFingersCalibrated = false;
-                }
-            }
-            yield return null;
+            return $"Insufficient joint data for {finger} finger\n";
         }
-        calibrationActive = false;
+
+        // Compute MCP → PIP rotation
+        Quaternion mcpToPip = Quaternion.Inverse(jointPoses[indices[1]].rotation) * jointPoses[indices[2]].rotation;
+        Vector3 mcpEuler = mcpToPip.eulerAngles;
+        float mcpFlexion = NormalizeAngle(mcpEuler.x);
+        float mcpAdduction = NormalizeAngle(mcpEuler.y);
+
+        // Compute PIP → DIP rotation using axis–angle (flexion only)
+        Quaternion pipToDip = Quaternion.Inverse(jointPoses[indices[2]].rotation) * jointPoses[indices[3]].rotation;
+        pipToDip.ToAngleAxis(out float pipAngle, out Vector3 pipAxis);
+        float pipFlexion = NormalizeAngle(pipAngle);
+
+        string s = "";
+        s += $"{finger} MCP Flexion: {mcpFlexion:F1}°\n";
+        s += $"{finger} MCP Adduction: {mcpAdduction:F1}°\n";
+        s += $"{finger} PIP Flexion: {pipFlexion:F1}°\n";
+        return s;
     }
 
-    float GetFingerExtension(int _fingerId)
+    /// <summary>
+    /// Normalizes an angle (in degrees) to the range [-180, 180].
+    /// </summary>
+    private float NormalizeAngle(float angle)
     {
-        // Get tip bone for current finger.
-        OVRBone bone = handSkeleton.Bones[(int)tips[_fingerId]];
-        // Calculate the position of the tip bone relative to the handSkeleton object.
-        Vector3 distance = handSkeleton.transform.InverseTransformPoint(bone.Transform.position);
-        Vector3 distAbs = Abs(distance);
-        // The thumb flexes on a different plane than the rest of the fingers.
-        return bone.Id == OVRSkeleton.BoneId.Hand_ThumbTip ? distAbs.z : distAbs.x;
-    }
-
-    Vector3 Abs(Vector3 v)
-    {
-        return new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
-    }
-
-    void PrintJointAngles()
-    {
-        string anglesOutput = "";
-        // Loop over every bone in the hand skeleton.
-        foreach (var bone in handSkeleton.Bones)
+        angle %= 360f;
+        if (angle > 180f)
         {
-            // Exclude certain bones from the output.
-            if (bone.Id == OVRSkeleton.BoneId.Hand_Index3 ||
-                bone.Id == OVRSkeleton.BoneId.Hand_Middle3 ||
-                bone.Id == OVRSkeleton.BoneId.Hand_Ring3 ||
-                bone.Id == OVRSkeleton.BoneId.Hand_Pinky0 ||
-                bone.Id == OVRSkeleton.BoneId.Hand_Pinky3 ||
-                bone.Id == OVRSkeleton.BoneId.Hand_IndexTip ||
-                bone.Id == OVRSkeleton.BoneId.Hand_MiddleTip ||
-                bone.Id == OVRSkeleton.BoneId.Hand_RingTip ||
-                bone.Id == OVRSkeleton.BoneId.Hand_PinkyTip ||
-                bone.Id == OVRSkeleton.BoneId.Hand_ThumbTip ||
-                bone.Id == OVRSkeleton.BoneId.Hand_WristRoot ||
-                bone.Id == OVRSkeleton.BoneId.Hand_ForearmStub)
-            {
-                continue;
-            }
-
-            float flexionAngle = 0f;
-            float abductionAngle = 0f;
-
-            // Compute signed flexion angle relative to parent.
-            if (bone.Transform.parent != null)
-            {
-                // Here we assume that flexion/extension occurs around the parent's right axis.
-                // Using parent's forward vectors as the comparison.
-                flexionAngle = Vector3.SignedAngle(
-                    bone.Transform.parent.up,
-                    bone.Transform.up,
-                    bone.Transform.parent.forward);
-            }
-
-            // For MCP joints (index, middle, ring, pinky), compute signed abduction/adduction.
-            // We'll compute this as the signed angle between the parent's up vector and the bone's up vector,
-            // using the parent's forward vector as the rotation axis.
-            bool isMCP = false;
-            if (bone.Id == OVRSkeleton.BoneId.Hand_Index1 ||
-                bone.Id == OVRSkeleton.BoneId.Hand_Middle1 ||
-                bone.Id == OVRSkeleton.BoneId.Hand_Ring1 ||
-                bone.Id == OVRSkeleton.BoneId.Hand_Pinky1)
-            {
-                isMCP = true;
-                abductionAngle = Vector3.SignedAngle(
-                    bone.Transform.parent.forward,
-                    bone.Transform.forward,
-                    bone.Transform.parent.right);
-            }
-
-            // Append to output.
-            if (isMCP)
-            {
-                anglesOutput += bone.Transform.name +
-                                ": Flexion: " + flexionAngle.ToString("F2") + "�, " +
-                                "Abduction: " + abductionAngle.ToString("F2") + "�\n";
-            }
-            else
-            {
-                anglesOutput += bone.Transform.name + ": Flexion: " + flexionAngle.ToString("F2") + "�\n";
-            }
+            angle -= 360f;
         }
-        // Log and send the joint angles.
-        LogHUD("Joint Angles:\n" + anglesOutput);
-        SendJointAngles(anglesOutput);
+        return angle;
     }
 
+    /// <summary>
+    /// Returns joint indices for the given finger based on the standard Oculus hand skeleton.
+    /// For the thumb, we assume a 4-joint chain (e.g. indices 1,2,3,4).
+    /// For non-thumb fingers, we assume a 5-joint chain.
+    /// Adjust these if your actual data uses different indexing.
+    /// </summary>
+    private int[] GetFingerJointIndices(HandFinger finger)
+    {
+        switch (finger)
+        {
+            case HandFinger.Thumb:
+                return new int[] { 1, 2, 3, 4 };
+            case HandFinger.Index:
+                return new int[] { 5, 6, 7, 8, 9 };
+            case HandFinger.Middle:
+                return new int[] { 10, 11, 12, 13, 14 };
+            case HandFinger.Ring:
+                return new int[] { 15, 16, 17, 18, 19 };
+            case HandFinger.Pinky:
+                return new int[] { 20, 21, 22, 23, 24 };
+            default:
+                return new int[0];
+        }
+    }
+
+    // New: Method to send joint angles over UDP
     void SendJointAngles(string message)
     {
         try
@@ -244,8 +220,10 @@ public class HandTracking : MonoBehaviour
         }
     }
 
-    void LogHUD(string message)
+    // Helper method to log messages to the HUD on the channel for the current hand side.
+    private void LogHUD(string message)
     {
-        LogManager.Instance.Log(this.GetType() + ":" + handType + ": " + message);
+        // Logs using the hand side as the source (e.g., "Left" or "Right")
+        LogManager.Instance.Log(handSide.ToString(), message);
     }
 }

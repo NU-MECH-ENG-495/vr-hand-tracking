@@ -1,9 +1,13 @@
 using UnityEngine;
 using System.Collections.Generic;
+
 public class LogManager : MonoBehaviour
 {
     public static LogManager Instance { get; private set; }
-    private List<string> logMessages = new List<string>();
+
+    // Dictionary mapping a source name to its log messages
+    private Dictionary<string, List<string>> logMessages = new Dictionary<string, List<string>>();
+
     private void Awake()
     {
         if (Instance == null)
@@ -16,13 +20,25 @@ public class LogManager : MonoBehaviour
             Destroy(gameObject);
         }
     }
-    public void Log(string message)
+
+    // Log a message to a specific source
+    public void Log(string source, string message)
     {
-        logMessages.Add(message);
-        Debug.Log(message);
+        if (!logMessages.ContainsKey(source))
+        {
+            logMessages[source] = new List<string>();
+        }
+        logMessages[source].Add(message);
+        Debug.Log($"[{source}] {message}");
     }
-    public List<string> GetLogMessages()
+
+    // Get log messages for a specific source
+    public List<string> GetLogMessages(string source)
     {
-        return logMessages;
+        if (logMessages.ContainsKey(source))
+        {
+            return logMessages[source];
+        }
+        return new List<string>();
     }
 }
