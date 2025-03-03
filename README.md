@@ -7,6 +7,9 @@ This project integrates VR and robotics to track hand joint angles in real time.
 
 ## Schematic
 
+![image](https://github.com/user-attachments/assets/3b029a6e-b938-49da-9050-409bfc95cc9b)
+
+
 ## Development
 
 There are two parts to this project - first part mostly focuses on developing unity app with C# and VR utilities to capture and compute joint angle data. The second part is mostly C++ ros2 project for receiving and data publishing.
@@ -39,7 +42,7 @@ On ROS2 system:
 To see joint angle printout
 - `ros2 topic echo /hand_joint_angles`
 
-Alternatively, to remote control robotic hand:
+Alternatively, to remote control [robotic hand](https://github.com/wengmister/Dex_Hand_MSR):
 - `git clone https://github.com/wengmister/Dex_Hand_MSR.git`
 - `cd Dex_Hand_MSR`
 - `rosdep install --from-paths src --ignore-src -r -y`
