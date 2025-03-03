@@ -2726,7 +2726,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &514490487
 Transform:
   m_ObjectHideFlags: 0
@@ -6566,7 +6566,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1193801261
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9974,7 +9974,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1922402550
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -10036,7 +10036,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _logToHUD: 1
-  _logFrequency: 0.1
+  _logFrequency: 0.01
   handSide: 0
   remoteIP: 255.255.255.255
   remotePort: 9000
@@ -10983,7 +10983,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _logToHUD: 1
-  _logFrequency: 0.1
+  _logFrequency: 0.01
   handSide: 1
   remoteIP: 255.255.255.255
   remotePort: 9000
