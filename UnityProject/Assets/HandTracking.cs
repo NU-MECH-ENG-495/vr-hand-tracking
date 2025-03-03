@@ -13,7 +13,7 @@ public class HandJointAnglesLogger : MonoBehaviour
     private bool _logToHUD = true;
 
     [SerializeField]
-    private float _logFrequency = 0.1f; // Log every 0.1 seconds
+    private float _logFrequency = 0.01f; // Log every 0.01 seconds
 
     // New: specify which hand this logger is for.
     [SerializeField] private HandSide handSide;
@@ -130,8 +130,8 @@ public class HandJointAnglesLogger : MonoBehaviour
         s += $"Thumb CMC Adduction: {cmcMcpAdduction:F1}°\n";
         s += $"Thumb MCP Flexion: {mcpIpFlexion:F1}°\n";
         s += $"Thumb MCP Adduction: {mcpIpAdduction:F1}°\n";
-        s += $"Thumb IP Flexion: {ipTipFlexion:F1}°\n";
-        s += $"Thumb IP Adduction: {ipTipAdduction:F1}°\n";
+        // s += $"Thumb IP Flexion: {ipTipFlexion:F1}°\n";
+        // s += $"Thumb IP Adduction: {ipTipAdduction:F1}°\n";
         return s;
     }
 
