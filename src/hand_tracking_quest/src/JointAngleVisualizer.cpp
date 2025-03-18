@@ -1,12 +1,16 @@
 #include <QApplication>
 #include <QMainWindow>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QSlider>
 #include <QTimer>
 #include <QVector>
 #include <QString>
 #include <QDebug>
 #include <QObject>
+#include <tuple>
+#include <QList>
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
@@ -32,7 +36,7 @@ signals:
 private:
   void topic_callback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
   {
-    // Use the QVector constructor with iterators (avoids deprecated fromStdVector).
+    // Use the QVector constructor with iterators.
     QVector<float> angles(msg->data.begin(), msg->data.end());
     emit newJointAngles(angles);
   }
@@ -40,7 +44,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr subscription_;
 };
 
-// Main window that displays the joint angles.
+// Main window that displays the joint angles as sliders.
 class MainWindow : public QMainWindow
 {
   Q_OBJECT
@@ -50,32 +54,65 @@ public:
              QWidget* parent = nullptr)
     : QMainWindow(parent), subscriber_(subscriber), executor_(executor)
   {
-    // Set up a simple UI with a label.
+    // Set up a vertical layout to hold the sliders.
     QWidget* centralWidget = new QWidget(this);
-    QVBoxLayout* layout = new QVBoxLayout(centralWidget);
-    label_ = new QLabel("Waiting for joint angles...", centralWidget);
-    layout->addWidget(label_);
+    layout_ = new QVBoxLayout(centralWidget);
     setCentralWidget(centralWidget);
 
-    // Connect the subscriber's signal to update the display.
+    // Connect the subscriber's signal to update the slider display.
     connect(subscriber_, &JointAnglesSubscriber::newJointAngles,
             this, &MainWindow::updateAngles);
 
     // Create a timer to periodically process incoming ROS messages.
     QTimer* timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, &MainWindow::spinOnce);
-    timer->start(50);  // Spin every 50 milliseconds.
+    timer->start(50);  // Process callbacks every 50 milliseconds.
   }
 
 public slots:
-  // Update the label with the received joint angles.
+  // Update the slider widgets with the received joint angles.
   void updateAngles(const QVector<float>& angles)
   {
-    QString text = "Joint Angles:\n";
-    for (int i = 0; i < angles.size(); i++) {
-      text += QString("Angle %1: %2\n").arg(i).arg(angles[i]);
+    // If the number of sliders doesn't match the number of angles, rebuild the layout.
+    if (sliderWidgets_.size() != angles.size())
+    {
+      // Remove all existing widgets.
+      QLayoutItem *child;
+      while ((child = layout_->takeAt(0)) != nullptr) {
+        if (child->widget()) {
+          child->widget()->deleteLater();
+        }
+        delete child;
+      }
+      sliderWidgets_.clear();
+
+      // For each joint angle, create a horizontal layout with a label, slider, and a value label.
+      for (int i = 0; i < angles.size(); ++i) {
+        QWidget* rowWidget = new QWidget(this);
+        QHBoxLayout* hLayout = new QHBoxLayout(rowWidget);
+        QLabel* jointLabel = new QLabel(QString("Joint %1:").arg(i), rowWidget);
+        QSlider* slider = new QSlider(Qt::Horizontal, rowWidget);
+        // Assume a range of -180 to 180 degrees, multiplied by 10 for precision.
+        slider->setRange(-1800, 1800);
+        slider->setEnabled(false); // Read-only slider for visualization.
+        QLabel* valueLabel = new QLabel(rowWidget);
+        hLayout->addWidget(jointLabel);
+        hLayout->addWidget(slider);
+        hLayout->addWidget(valueLabel);
+        layout_->addWidget(rowWidget);
+        sliderWidgets_.append(std::make_tuple(slider, valueLabel));
+      }
     }
-    label_->setText(text);
+
+    // Update each slider with the new angle value.
+    for (int i = 0; i < angles.size(); ++i) {
+      float angle = angles[i];
+      int sliderValue = static_cast<int>(angle * 10); // Convert float to int (1 unit = 0.1°).
+      QSlider* slider = std::get<0>(sliderWidgets_[i]);
+      QLabel* valueLabel = std::get<1>(sliderWidgets_[i]);
+      slider->setValue(sliderValue);
+      valueLabel->setText(QString::number(angle, 'f', 1));
+    }
   }
 
   // Process pending ROS callbacks.
@@ -87,7 +124,9 @@ public slots:
 private:
   JointAnglesSubscriber* subscriber_;
   rclcpp::executors::SingleThreadedExecutor* executor_;
-  QLabel* label_;
+  QVBoxLayout* layout_;
+  // Each tuple contains a pointer to a QSlider and its associated QLabel.
+  QList<std::tuple<QSlider*, QLabel*>> sliderWidgets_;
 };
 
 int main(int argc, char *argv[])
@@ -116,4 +155,3 @@ int main(int argc, char *argv[])
 }
 
 #include "JointAngleVisualizer.moc"
-    
