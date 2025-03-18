@@ -1,3 +1,12 @@
+/**
+ * @file HandTrackerQuestNode.cpp
+ * @brief ROS2 node that receives UDP packets, parses joint angles using regex, and publishes them.
+ *
+ * This file implements a ROS2 node that creates a UDP socket to receive joint angle data,
+ * uses a regular expression to extract floating-point numbers from the incoming message,
+ * and publishes the parsed joint angles as a std_msgs::msg::Float32MultiArray.
+ */
+
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
 
@@ -14,12 +23,25 @@
 #include <condition_variable>
 #include <sstream>
 #include <cctype>
-#include <regex>   // Added for regex support
+#include <regex>
 
+/**
+ * @brief Class that implements a UDP receiver node for joint angles.
+ *
+ * This node creates a UDP socket on the specified port, receives data packets,
+ * parses the joint angles using a regular expression, and publishes them.
+ */
 class HandTrackerQuestNode : public rclcpp::Node
 {
 public:
-  // Constructor now accepts NodeOptions.
+  /**
+   * @brief Constructor.
+   *
+   * Initializes the node with the given options, declares parameters, and starts
+   * the receiver and processing threads.
+   *
+   * @param options ROS2 node options.
+   */
   explicit HandTrackerQuestNode(const rclcpp::NodeOptions & options)
   : Node("udp_receiver_node", options), running_(true)
   {
@@ -30,11 +52,18 @@ public:
     port_ = this->get_parameter("port").as_int();
     debug_ = this->get_parameter("debug").as_bool();
     
+    // Create the publisher for joint angle messages.
     publisher_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("hand_joint_angles", 10);
+    // Launch the receiver and processing threads.
     receiver_thread_ = std::thread(&HandTrackerQuestNode::receiverThread, this);
     processing_thread_ = std::thread(&HandTrackerQuestNode::processingThread, this);
   }
 
+  /**
+   * @brief Destructor.
+   *
+   * Stops the threads and closes the socket.
+   */
   ~HandTrackerQuestNode()
   {
     running_ = false;
@@ -50,7 +79,12 @@ public:
   }
 
 private:
-  // Thread that receives UDP messages and pushes them into a queue.
+  /**
+   * @brief Thread function to receive UDP messages.
+   *
+   * Creates a UDP socket, binds to the specified port, and listens for incoming messages.
+   * Received messages are pushed into a queue for processing.
+   */
   void receiverThread()
   {
     // Create UDP socket.
@@ -92,8 +126,12 @@ private:
     }
   }
 
-  // Thread that processes messages from the queue, extracts joint angles,
-  // and publishes them as a Float32MultiArray.
+  /**
+   * @brief Thread function to process received messages.
+   *
+   * Waits for messages to appear in the queue, then processes each message by parsing
+   * joint angles and publishing them as a std_msgs::msg::Float32MultiArray.
+   */
   void processingThread()
   {
     while (running_) {
@@ -120,7 +158,14 @@ private:
     }
   }
 
-  // Modified parser using regular expressions to extract floating-point numbers.
+  /**
+   * @brief Parses a message string to extract joint angle values.
+   *
+   * Uses a regular expression to search for all floating-point numbers in the message string.
+   *
+   * @param message The input message containing joint angle data.
+   * @return std::vector<float> A vector of parsed joint angle values.
+   */
   std::vector<float> parseJointAngles(const std::string &message)
   {
     std::vector<float> angles;
@@ -142,18 +187,28 @@ private:
   }
 
   // Member variables.
-  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr publisher_;
-  std::thread receiver_thread_;
-  std::thread processing_thread_;
-  std::queue<std::string> message_queue_;
-  std::mutex queue_mutex_;
-  std::condition_variable queue_cond_;
-  int sockfd_{-1};
-  bool running_;
-  int port_;
-  bool debug_;
+  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr publisher_; ///< ROS2 publisher for joint angles.
+  std::thread receiver_thread_;         ///< Thread for receiving UDP messages.
+  std::thread processing_thread_;       ///< Thread for processing and publishing messages.
+  std::queue<std::string> message_queue_; ///< Queue to hold received messages.
+  std::mutex queue_mutex_;              ///< Mutex for protecting access to the message queue.
+  std::condition_variable queue_cond_;  ///< Condition variable for signaling new messages.
+  int sockfd_{-1};                      ///< Socket file descriptor.
+  bool running_;                        ///< Flag to control the threads.
+  int port_;                            ///< UDP port to bind.
+  bool debug_;                          ///< Debug flag.
 };
 
+/**
+ * @brief Main entry point for the UDP receiver node.
+ *
+ * Initializes ROS2, creates the HandTrackerQuestNode, adjusts thread priority if possible,
+ * and enters the ROS2 spin loop.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Array of command-line argument strings.
+ * @return int Exit status.
+ */
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
@@ -161,7 +216,7 @@ int main(int argc, char **argv)
   auto options = rclcpp::NodeOptions().use_intra_process_comms(true);
   auto node = std::make_shared<HandTrackerQuestNode>(options);
   
-  // Set thread priority if possible (may require root privileges)
+  // Set thread priority if possible (may require root privileges).
   pthread_t this_thread = pthread_self();
   struct sched_param params;
   params.sched_priority = sched_get_priority_max(SCHED_FIFO);
