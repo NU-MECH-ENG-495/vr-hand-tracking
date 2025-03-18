@@ -81,6 +81,7 @@ private:
       if (bytesReceived > 0) {
         buffer[bytesReceived] = '\0';
         std::string message(buffer);
+        RCLCPP_INFO(this->get_logger(), "Received UDP message: %s", message.c_str());
         {
           std::lock_guard<std::mutex> lock(queue_mutex_);
           message_queue_.push(message);
@@ -102,46 +103,42 @@ private:
         message_queue_.pop();
         lock.unlock();
 
+        RCLCPP_INFO(this->get_logger(), "Processing message: %s", message.c_str());
+
         std::vector<float> angles = parseJointAngles(message);
         if (!angles.empty()) {
           std_msgs::msg::Float32MultiArray msg;
           msg.data = angles;
           publisher_->publish(msg);
           RCLCPP_INFO(this->get_logger(), "Published %zu joint angles", angles.size());
+        } else {
+          RCLCPP_WARN(this->get_logger(), "No valid joint angles found in the message.");
         }
         lock.lock();
       }
     }
   }
 
-  // Parses the incoming message to extract joint angle values.
+  // Modified parser that splits the message by commas.
   std::vector<float> parseJointAngles(const std::string &message)
   {
     std::vector<float> angles;
-    std::istringstream stream(message);
-    std::string line;
+    std::istringstream ss(message);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+      // Trim leading and trailing whitespace.
+      token.erase(0, token.find_first_not_of(" \t"));
+      token.erase(token.find_last_not_of(" \t") + 1);
 
-    while (std::getline(stream, line)) {
-      auto pos = line.find(':');
-      if (pos != std::string::npos) {
-        std::string valueStr = line.substr(pos + 1);
-        // Trim whitespace.
-        valueStr.erase(0, valueStr.find_first_not_of(" \t"));
-        // Check if the first character is a digit or a sign.
-        if (valueStr.empty() || (!std::isdigit(valueStr[0]) && valueStr[0] != '-' && valueStr[0] != '+')) {
-          continue;
-        }
-        // Remove any trailing degree symbol.
-        size_t degreePos = valueStr.find("°");
-        if (degreePos != std::string::npos) {
-          valueStr = valueStr.substr(0, degreePos);
-        }
-        try {
-          float angle = std::stof(valueStr);
-          angles.push_back(angle);
-        } catch (const std::exception &e) {
-          RCLCPP_ERROR(this->get_logger(), "Failed to parse angle from line: %s", line.c_str());
-        }
+      // Skip tokens that are empty or contain a colon (likely headers).
+      if (token.empty() || token.find(':') != std::string::npos)
+        continue;
+
+      try {
+        float angle = std::stof(token);
+        angles.push_back(angle);
+      } catch (const std::exception &e) {
+        RCLCPP_ERROR(this->get_logger(), "Failed to parse token: %s", token.c_str());
       }
     }
     return angles;
@@ -164,7 +161,6 @@ int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
   
-  // Create node options with intra-process communications enabled.
   auto options = rclcpp::NodeOptions().use_intra_process_comms(true);
   auto node = std::make_shared<HandTrackerQuestNode>(options);
   
