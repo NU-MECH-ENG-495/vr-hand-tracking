@@ -9,11 +9,38 @@
 #include <QString>
 #include <QDebug>
 #include <QObject>
-#include <tuple>
 #include <QList>
+#include <tuple>
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
+
+// Define a struct to hold joint configuration.
+struct JointConfig {
+  QString name;
+  int min; // in degrees
+  int max; // in degrees
+};
+
+// Joint configuration for each joint in the specified order.
+static const QVector<JointConfig> jointConfigs = {
+  { "Thumb CMC Flexion",   -10, 50 },
+  { "Thumb CMC Abduction", -50, -20},
+  { "Thumb MCP Abduction", -10, 40 },
+  { "Thumb MCP Flexion",   -40, 80 },
+  { "Index MCP Flexion",   -20, 90 },
+  { "Index MCP Abduction", -15, 15 },
+  { "Index PIP",             0, 90 },
+  { "Middle MCP Flexion",  -20, 90 },
+  { "Middle MCP Abduction",-15, 15 },
+  { "Middle PIP",           0 , 90 },
+  { "Ring MCP Flexion",    -20, 90 },
+  { "Ring MCP Abduction",  -15, 15 },
+  { "Ring PIP",              0, 90 },
+  { "Pinky MCP Flexion",   -20, 90 },
+  { "Pinky MCP Abduction", -40, 15 },
+  { "Pinky PIP",             0, 90 }
+};
 
 // This class combines a ROS2 node with QObject to allow Qt signals/slots.
 class JointAnglesSubscriber : public QObject, public rclcpp::Node
@@ -59,6 +86,9 @@ public:
     layout_ = new QVBoxLayout(centralWidget);
     setCentralWidget(centralWidget);
 
+    // Build slider widgets based on jointConfigs.
+    rebuildSliderWidgets();
+
     // Connect the subscriber's signal to update the slider display.
     connect(subscriber_, &JointAnglesSubscriber::newJointAngles,
             this, &MainWindow::updateAngles);
@@ -73,41 +103,17 @@ public slots:
   // Update the slider widgets with the received joint angles.
   void updateAngles(const QVector<float>& angles)
   {
-    // If the number of sliders doesn't match the number of angles, rebuild the layout.
-    if (sliderWidgets_.size() != angles.size())
-    {
-      // Remove all existing widgets.
-      QLayoutItem *child;
-      while ((child = layout_->takeAt(0)) != nullptr) {
-        if (child->widget()) {
-          child->widget()->deleteLater();
-        }
-        delete child;
-      }
-      sliderWidgets_.clear();
-
-      // For each joint angle, create a horizontal layout with a label, slider, and a value label.
-      for (int i = 0; i < angles.size(); ++i) {
-        QWidget* rowWidget = new QWidget(this);
-        QHBoxLayout* hLayout = new QHBoxLayout(rowWidget);
-        QLabel* jointLabel = new QLabel(QString("Joint %1:").arg(i), rowWidget);
-        QSlider* slider = new QSlider(Qt::Horizontal, rowWidget);
-        // Assume a range of -180 to 180 degrees, multiplied by 10 for precision.
-        slider->setRange(-1800, 1800);
-        slider->setEnabled(false); // Read-only slider for visualization.
-        QLabel* valueLabel = new QLabel(rowWidget);
-        hLayout->addWidget(jointLabel);
-        hLayout->addWidget(slider);
-        hLayout->addWidget(valueLabel);
-        layout_->addWidget(rowWidget);
-        sliderWidgets_.append(std::make_tuple(slider, valueLabel));
-      }
+    // If the message doesn't match our expected joint count, warn.
+    if (angles.size() != jointConfigs.size()) {
+      qWarning() << "Expected" << jointConfigs.size() << "angles but received" << angles.size();
+      return;
     }
 
     // Update each slider with the new angle value.
+    // We multiply the angle by 10 for 0.1° resolution.
     for (int i = 0; i < angles.size(); ++i) {
       float angle = angles[i];
-      int sliderValue = static_cast<int>(angle * 10); // Convert float to int (1 unit = 0.1°).
+      int sliderValue = static_cast<int>(angle * 10);
       QSlider* slider = std::get<0>(sliderWidgets_[i]);
       QLabel* valueLabel = std::get<1>(sliderWidgets_[i]);
       slider->setValue(sliderValue);
@@ -122,6 +128,40 @@ public slots:
   }
 
 private:
+  // Create slider widgets based on jointConfigs.
+  void rebuildSliderWidgets()
+  {
+    // Clear any existing widgets from the layout.
+    QLayoutItem *child;
+    while ((child = layout_->takeAt(0)) != nullptr) {
+      if (child->widget()) {
+        child->widget()->deleteLater();
+      }
+      delete child;
+    }
+    sliderWidgets_.clear();
+
+    // For each joint, create a horizontal row containing:
+    // a label with the joint name, a read-only slider, and a value label.
+    for (int i = 0; i < jointConfigs.size(); ++i) {
+      const JointConfig& config = jointConfigs[i];
+      QWidget* rowWidget = new QWidget(this);
+      QHBoxLayout* hLayout = new QHBoxLayout(rowWidget);
+
+      QLabel* jointLabel = new QLabel(config.name, rowWidget);
+      QSlider* slider = new QSlider(Qt::Horizontal, rowWidget);
+      // Set slider range (multiply by 10 for 0.1° resolution).
+      slider->setRange(config.min * 10, config.max * 10);
+      slider->setEnabled(false); // Read-only slider for visualization.
+      QLabel* valueLabel = new QLabel(rowWidget);
+      hLayout->addWidget(jointLabel);
+      hLayout->addWidget(slider);
+      hLayout->addWidget(valueLabel);
+      layout_->addWidget(rowWidget);
+      sliderWidgets_.append(std::make_tuple(slider, valueLabel));
+    }
+  }
+
   JointAnglesSubscriber* subscriber_;
   rclcpp::executors::SingleThreadedExecutor* executor_;
   QVBoxLayout* layout_;
