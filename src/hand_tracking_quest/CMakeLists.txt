@@ -14,11 +14,21 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 
+# Find Qt packages.
+find_package(Qt5 COMPONENTS Widgets REQUIRED)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+
+add_executable(qt_joint_angles_viewer src/JointAngleVisualizer.cpp)
+ament_target_dependencies(qt_joint_angles_viewer rclcpp std_msgs)
+target_link_libraries(qt_joint_angles_viewer Qt5::Widgets)
+
 add_executable(hand_tracker_quest_node src/HandTrackerQuest.cpp)
 ament_target_dependencies(hand_tracker_quest_node rclcpp std_msgs)
 
 install(TARGETS
   hand_tracker_quest_node
+  qt_joint_angles_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 

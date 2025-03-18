@@ -9,19 +9,24 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <vector>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <sstream>
 #include <cctype>
 
 class HandTrackerQuestNode : public rclcpp::Node
 {
 public:
-  HandTrackerQuestNode()
-  : Node("udp_receiver_node"), running_(true)
+  // Constructor now accepts NodeOptions.
+  explicit HandTrackerQuestNode(const rclcpp::NodeOptions & options)
+  : Node("udp_receiver_node", options), running_(true)
   {
-    // Declare parameters
+    // Declare parameters.
     this->declare_parameter("port", 9000);
     this->declare_parameter("debug", false);
     
-    int port = this->get_parameter("port").as_int();
+    port_ = this->get_parameter("port").as_int();
     debug_ = this->get_parameter("debug").as_bool();
     
     publisher_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("hand_joint_angles", 10);
@@ -36,6 +41,11 @@ public:
     if (sockfd_ >= 0) {
       close(sockfd_);
     }
+    
+    if(receiver_thread_.joinable())
+      receiver_thread_.join();
+    if(processing_thread_.joinable())
+      processing_thread_.join();
   }
 
 private:
@@ -46,21 +56,21 @@ private:
     sockfd_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd_ < 0) {
       RCLCPP_ERROR(this->get_logger(), "Error creating socket: %s", strerror(errno));
-      return false;
+      return;
     }
 
     sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
+    addr.sin_port = htons(port_);
     addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(sockfd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-      RCLCPP_ERROR(this->get_logger(), "Error binding socket");
+      RCLCPP_ERROR(this->get_logger(), "Error binding socket: %s", strerror(errno));
       return;
     }
 
-    RCLCPP_INFO(this->get_logger(), "Listening for UDP packets on port 9000...");
+    RCLCPP_INFO(this->get_logger(), "Listening for UDP packets on port %d...", port_);
 
     char buffer[4096];
     while (running_) {
@@ -105,14 +115,12 @@ private:
   }
 
   // Parses the incoming message to extract joint angle values.
-  // It looks for lines with a colon and checks if the value part starts with a digit or a sign.
   std::vector<float> parseJointAngles(const std::string &message)
   {
     std::vector<float> angles;
     std::istringstream stream(message);
     std::string line;
 
-    // Process each line of the message.
     while (std::getline(stream, line)) {
       auto pos = line.find(':');
       if (pos != std::string::npos) {
@@ -148,13 +156,15 @@ private:
   std::condition_variable queue_cond_;
   int sockfd_{-1};
   bool running_;
+  int port_;
+  bool debug_;
 };
 
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
   
-  // Create node options with intra-process comms enabled
+  // Create node options with intra-process communications enabled.
   auto options = rclcpp::NodeOptions().use_intra_process_comms(true);
   auto node = std::make_shared<HandTrackerQuestNode>(options);
   
