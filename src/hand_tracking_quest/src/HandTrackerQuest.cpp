@@ -9,19 +9,23 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <vector>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <sstream>
 #include <cctype>
 
 class HandTrackerQuestNode : public rclcpp::Node
 {
 public:
   HandTrackerQuestNode()
-  : Node("udp_receiver_node"), running_(true)
+  : Node("tcp_receiver_node"), running_(true)
   {
     // Declare parameters
     this->declare_parameter("port", 9000);
     this->declare_parameter("debug", false);
     
-    int port = this->get_parameter("port").as_int();
+    port_ = this->get_parameter("port").as_int();
     debug_ = this->get_parameter("debug").as_bool();
     
     publisher_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("hand_joint_angles", 10);
@@ -36,52 +40,82 @@ public:
     if (sockfd_ >= 0) {
       close(sockfd_);
     }
+    
+    if(receiver_thread_.joinable())
+      receiver_thread_.join();
+    if(processing_thread_.joinable())
+      processing_thread_.join();
   }
 
 private:
-  // Thread that receives UDP messages and pushes them into a queue.
+  // Thread that accepts TCP connections and reads messages.
   void receiverThread()
   {
-    // Create UDP socket.
-    sockfd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    // Create TCP socket.
+    sockfd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd_ < 0) {
       RCLCPP_ERROR(this->get_logger(), "Error creating socket: %s", strerror(errno));
-      return false;
+      return;
     }
 
     sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
+    addr.sin_port = htons(port_);
     addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(sockfd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-      RCLCPP_ERROR(this->get_logger(), "Error binding socket");
+      RCLCPP_ERROR(this->get_logger(), "Error binding socket: %s", strerror(errno));
       return;
     }
 
-    RCLCPP_INFO(this->get_logger(), "Listening for UDP packets on port 9000...");
+    if (listen(sockfd_, 5) < 0) {
+      RCLCPP_ERROR(this->get_logger(), "Error listening on socket: %s", strerror(errno));
+      return;
+    }
 
-    char buffer[4096];
+    RCLCPP_INFO(this->get_logger(), "Listening for TCP connections on port %d...", port_);
+
     while (running_) {
       sockaddr_in clientAddr;
       socklen_t addrLen = sizeof(clientAddr);
-      ssize_t bytesReceived = recvfrom(sockfd_, buffer, sizeof(buffer) - 1, 0,
-                                         (struct sockaddr*)&clientAddr, &addrLen);
-      if (bytesReceived > 0) {
-        buffer[bytesReceived] = '\0';
-        std::string message(buffer);
-        {
-          std::lock_guard<std::mutex> lock(queue_mutex_);
-          message_queue_.push(message);
+      int clientSock = accept(sockfd_, (struct sockaddr*)&clientAddr, &addrLen);
+      if (clientSock < 0) {
+        if (running_) {
+          RCLCPP_ERROR(this->get_logger(), "Error accepting connection: %s", strerror(errno));
         }
-        queue_cond_.notify_one();
+        continue;
       }
+
+      RCLCPP_INFO(this->get_logger(), "Accepted TCP connection from %s:%d",
+                  inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+
+      char buffer[4096];
+      // Read data from the connected client.
+      while (running_) {
+        ssize_t bytesReceived = recv(clientSock, buffer, sizeof(buffer) - 1, 0);
+        if (bytesReceived > 0) {
+          buffer[bytesReceived] = '\0';
+          std::string message(buffer);
+          {
+            std::lock_guard<std::mutex> lock(queue_mutex_);
+            message_queue_.push(message);
+          }
+          queue_cond_.notify_one();
+        } else if (bytesReceived == 0) {
+          // Connection closed by client.
+          RCLCPP_INFO(this->get_logger(), "TCP connection closed by client.");
+          break;
+        } else {
+          RCLCPP_ERROR(this->get_logger(), "Error receiving data: %s", strerror(errno));
+          break;
+        }
+      }
+      close(clientSock);
     }
   }
 
-  // Thread that processes messages from the queue, extracts joint angles,
-  // and publishes them as a Float32MultiArray.
+  // Thread that processes messages from the queue and publishes them.
   void processingThread()
   {
     while (running_) {
@@ -105,25 +139,20 @@ private:
   }
 
   // Parses the incoming message to extract joint angle values.
-  // It looks for lines with a colon and checks if the value part starts with a digit or a sign.
   std::vector<float> parseJointAngles(const std::string &message)
   {
     std::vector<float> angles;
     std::istringstream stream(message);
     std::string line;
 
-    // Process each line of the message.
     while (std::getline(stream, line)) {
       auto pos = line.find(':');
       if (pos != std::string::npos) {
         std::string valueStr = line.substr(pos + 1);
-        // Trim whitespace.
         valueStr.erase(0, valueStr.find_first_not_of(" \t"));
-        // Check if the first character is a digit or a sign.
         if (valueStr.empty() || (!std::isdigit(valueStr[0]) && valueStr[0] != '-' && valueStr[0] != '+')) {
           continue;
         }
-        // Remove any trailing degree symbol.
         size_t degreePos = valueStr.find("°");
         if (degreePos != std::string::npos) {
           valueStr = valueStr.substr(0, degreePos);
@@ -148,17 +177,19 @@ private:
   std::condition_variable queue_cond_;
   int sockfd_{-1};
   bool running_;
+  int port_;
+  bool debug_;
 };
 
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
   
-  // Create node options with intra-process comms enabled
+  // Create node options with intra-process communications enabled.
   auto options = rclcpp::NodeOptions().use_intra_process_comms(true);
   auto node = std::make_shared<HandTrackerQuestNode>(options);
   
-  // Set thread priority if possible (may require root privileges)
+  // Set thread priority if possible.
   pthread_t this_thread = pthread_self();
   struct sched_param params;
   params.sched_priority = sched_get_priority_max(SCHED_FIFO);
