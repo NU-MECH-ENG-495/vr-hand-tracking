@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Launch the UDP tracker node -->
+  <node pkg="hand_tracking_quest" exec="hand_tracker_quest_node" name="hand_tracker_quest_node" output="screen">
+    <param name="port" value="9000" />
+    <param name="debug" value="false" />
+  </node>
+
+  <!-- Launch the Qt visualizer node -->
+  <node pkg="hand_tracking_quest" exec="qt_joint_angles_viewer" name="qt_joint_angles_viewer" output="screen" />
+</launch>

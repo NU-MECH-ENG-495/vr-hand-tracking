@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <sstream>
 #include <cctype>
+#include <regex>   // Added for regex support
 
 class HandTrackerQuestNode : public rclcpp::Node
 {
@@ -119,26 +120,22 @@ private:
     }
   }
 
-  // Modified parser that splits the message by commas.
+  // Modified parser using regular expressions to extract floating-point numbers.
   std::vector<float> parseJointAngles(const std::string &message)
   {
     std::vector<float> angles;
-    std::istringstream ss(message);
-    std::string token;
-    while (std::getline(ss, token, ',')) {
-      // Trim leading and trailing whitespace.
-      token.erase(0, token.find_first_not_of(" \t"));
-      token.erase(token.find_last_not_of(" \t") + 1);
+    // Regular expression to match signed numbers with optional decimals.
+    std::regex numberRegex("[-+]?[0-9]*\\.?[0-9]+");
+    auto numbersBegin = std::sregex_iterator(message.begin(), message.end(), numberRegex);
+    auto numbersEnd = std::sregex_iterator();
 
-      // Skip tokens that are empty or contain a colon (likely headers).
-      if (token.empty() || token.find(':') != std::string::npos)
-        continue;
-
+    for (std::sregex_iterator i = numbersBegin; i != numbersEnd; ++i) {
+      std::smatch match = *i;
       try {
-        float angle = std::stof(token);
+        float angle = std::stof(match.str());
         angles.push_back(angle);
       } catch (const std::exception &e) {
-        RCLCPP_ERROR(this->get_logger(), "Failed to parse token: %s", token.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Failed to parse number: %s", match.str().c_str());
       }
     }
     return angles;
