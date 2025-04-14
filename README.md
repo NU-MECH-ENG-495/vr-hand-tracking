@@ -9,6 +9,11 @@ This project integrates VR and robotics to track hand joint angles in real time.
 
 ![image](https://github.com/user-attachments/assets/3b029a6e-b938-49da-9050-409bfc95cc9b)
 
+## Requirements
+
+- Unity 6
+- [Meta Interactino SDK](https://developers.meta.com/horizon/documentation/unity/unity-isdk-interaction-sdk-overview/)
+- OXR Hand
 
 ## Development
 
@@ -42,8 +47,8 @@ On ROS2 system:
 
 
 Alternatively, to remote control [robotic hand](https://github.com/wengmister/Dex_Hand_MSR):
-- `git clone https://github.com/wengmister/Dex_Hand_MSR.git`
-- `cd Dex_Hand_MSR`
+- `git clone https://github.com/wengmister/BiDexHand.git`
+- `cd BiDexHand`
 - `rosdep install --from-paths src --ignore-src -r -y`
 - `colcon build`
 - `. install/setup.bash`
