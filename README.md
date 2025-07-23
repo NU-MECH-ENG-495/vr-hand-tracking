@@ -1,5 +1,4 @@
 # VR Based Hand Joint Angle Tracking
-Northwestern ME 495 Winter 2025
 Author: [Zhengyang Kris Weng](https://wengmister.github.io/)
 
 ## Overview
@@ -11,10 +10,10 @@ This project integrates VR and robotics to track hand joint angles in real time.
 
 ## Requirements
 
-- Unity 6
+- [Unity 6](https://unity.com/releases/unity-6)
 - [Meta Interactino SDK](https://developers.meta.com/horizon/documentation/unity/unity-isdk-interaction-sdk-overview/)
-- OXR Hand
-
+  - [OXR Hand](https://developers.meta.com/horizon/documentation/unity/unity-isdk-openxr-hand/)
+  
 ## Development
 
 There are two parts to this project - first part mostly focuses on developing unity app with C# and VR utilities to capture and compute joint angle data. The second part is mostly C++ ros2 project for receiving and data publishing.
@@ -33,6 +32,9 @@ The C++ ros2 node, running on the client PC will listen to all incoming addresse
 ## Quickstart
 
 Deploy Unity Project via Unity Editor
+- Configure required plugins outlined in #Requirements section
+- Import unity project
+- Select `android` as build platform
 - Select `Meta Quest 3/3s` as build target
 - `Build and Run`
 
@@ -45,7 +47,6 @@ On ROS2 system:
 - `ros2 launch hand_tracking_quest hand.launch.xml`
 
 
-
 Alternatively, to remote control [robotic hand](https://github.com/wengmister/Dex_Hand_MSR):
 - `git clone https://github.com/wengmister/BiDexHand.git`
 - `cd BiDexHand`
@@ -53,35 +54,6 @@ Alternatively, to remote control [robotic hand](https://github.com/wengmister/De
 - `colcon build`
 - `. install/setup.bash`
 - `ros2 launch hand_motion_shadowing shadowing.launch.xml cam:=quest`
-
-## OOP Considerations
-
-- **OOP Structure and Encapsulation:**
-  - The node is implemented as a C++ class (`HandTrackerQuestNode`) that inherits from `rclcpp::Node`, encapsulating all functionality (UDP reception, message parsing, and publishing) within a single object.
-  - The design separates public interfaces from private implementation details, making the code modular and maintainable.
-
-- **Smart Pointers:**
-  - Utilizes ROS2’s smart pointers, for instance, the publisher is created using a `std::shared_ptr` (`rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr`), ensuring automatic memory management.
-  - The node itself is instantiated as a shared pointer in `main()`, promoting robust resource handling and avoiding manual memory deallocation.
-
-- **Regular Expressions (Regex):**
-  - Implements `std::regex` in the `parseJointAngles` method to extract floating-point numbers from the incoming UDP messages.
-  - The regex pattern (`[-+]?[0-9]*\\.?[0-9]+`) is designed to capture signed numbers with optional decimals, ensuring flexibility in parsing different numeric formats.
-
-- **Multithreading:**
-  - Two separate threads are employed:
-    - **Receiver Thread:** Continuously listens for UDP packets, processes incoming data, and pushes messages into a queue.
-    - **Processing Thread:** Waits for messages in the queue, extracts joint angles using regex, and publishes the results.
-  - Thread synchronization is handled using `std::mutex` and `std::condition_variable` to protect shared resources (i.e., the message queue) and coordinate thread activity.
-  - Threads are properly managed with clean startup and graceful shutdown (via the `running_` flag and joining threads in the destructor).
-
-- **Error Handling and Resource Management (RAII):**
-  - Error scenarios (e.g., socket creation/binding failures) are logged using ROS2 logging mechanisms, providing immediate feedback during runtime.
-  - The destructor ensures that resources like threads and the socket are cleanly released, following RAII principles to prevent resource leaks.
-
-- **Additional OOP Considerations:**
-  - Parameters (e.g., port number, debug flag) are declared and initialized through the node’s constructor, making the class configurable and extensible.
-  - The code attempts to adjust thread priority using POSIX scheduling functions, reflecting a consideration for performance in time-sensitive applications.
 
 ## QT Gui
 GUI:    
