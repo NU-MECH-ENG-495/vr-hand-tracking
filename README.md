@@ -1,6 +1,9 @@
 # VR Based Hand Joint Angle Tracking
 Author: [Zhengyang Kris Weng](https://wengmister.github.io/)
 
+**!!Updates!!**  
+For integrated wrist/hand tracking, or alternatively dexterous-retargeting, see updates in [this repo](https://github.com/wengmister/quest-wrist-tracker/tree/dex-retargeter).
+
 ## Overview
 This project integrates VR and robotics to track hand joint angles in real time. It consists of two main components: a Unity-based VR application that captures joint angle data using Meta’s OpenXR SDK (previously using Oculus SDK) and broadcasts this data via UDP, and a C++ ROS2 node that receives the data, publishes it to a ROS2 topic, and provides a visualization UI. Additionally, the system can interface with a robotic hand for remote control.
 
